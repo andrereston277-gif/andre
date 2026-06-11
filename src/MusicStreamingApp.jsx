@@ -10,13 +10,63 @@ import {
   SkipBack,
   SkipForward,
   Volume2,
+  Loader2,
 } from 'lucide-react';
+import { supabase } from './lib/supabase';
+
+function formatDuration(seconds) {
+  if (!seconds) return '0:00';
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function formatPlays(plays) {
+  if (plays >= 1000000) return `${(plays / 1000000).toFixed(1)}M plays`;
+  if (plays >= 1000) return `${(plays / 1000).toFixed(0)}K plays`;
+  return `${plays} plays`;
+}
+
+function timeAgo(dateStr) {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const days = Math.floor(diff / 86400000);
+  if (days < 1) return 'Added today';
+  if (days < 7) return `Added ${days} day${days > 1 ? 's' : ''} ago`;
+  if (days < 30) return `Added ${Math.floor(days / 7)} week${Math.floor(days / 7) > 1 ? 's' : ''} ago`;
+  return `Added ${Math.floor(days / 30)} month${Math.floor(days / 30) > 1 ? 's' : ''} ago`;
+}
 
 export default function MusicStreamingApp() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
   const [progress, setProgress] = useState(42);
+  const [playlists, setPlaylists] = useState([]);
+  const [tracks, setTracks] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const contentRef = useRef(null);
+
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        const [playlistsRes, tracksRes] = await Promise.all([
+          supabase.from('playlists').select('*').order('created_at', { ascending: false }),
+          supabase.from('tracks').select('*').order('created_at', { ascending: false }),
+        ]);
+
+        if (playlistsRes.error) throw playlistsRes.error;
+        if (tracksRes.error) throw tracksRes.error;
+
+        setPlaylists(playlistsRes.data || []);
+        setTracks(tracksRes.data || []);
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchData();
+  }, []);
 
   // Initialize Lenis smooth scrolling
   useEffect(() => {
@@ -47,53 +97,7 @@ export default function MusicStreamingApp() {
     return () => lenis.destroy();
   }, []);
 
-  // Mock playlist data
-  const playlists = [
-    {
-      id: 1,
-      title: 'Midnight Jazz',
-      description: 'Smooth jazz classics for late-night vibes and relaxation',
-      plays: 45200,
-    },
-    {
-      id: 2,
-      title: 'Electric Dreams',
-      description: 'Synthwave and electronic beats that transport you elsewhere',
-      plays: 128900,
-    },
-    {
-      id: 3,
-      title: 'Golden Hour',
-      description: 'Indie folk and acoustic tracks for sunset moments',
-      plays: 67400,
-    },
-    {
-      id: 4,
-      title: 'Neon Nights',
-      description: 'High-energy electronic and dance tracks for peak energy',
-      plays: 234100,
-    },
-    {
-      id: 5,
-      title: 'Ambient Escape',
-      description: 'Atmospheric soundscapes and ambient music for focus',
-      plays: 89300,
-    },
-    {
-      id: 6,
-      title: 'Soul Classics',
-      description: 'Timeless soul and R&B records from legendary artists',
-      plays: 156800,
-    },
-  ];
-
-  const tracks = [
-    { id: 1, title: 'Midnight Echoes', artist: 'Luna & Stars' },
-    { id: 2, title: 'Neon Pulse', artist: 'Synth Wave Collective' },
-    { id: 3, title: 'Golden Horizon', artist: 'The Acoustic Wanderers' },
-  ];
-
-  const currentTrack = tracks[currentTrackIndex];
+  const currentTrack = tracks[currentTrackIndex] || { title: 'No Track', artist: '—', duration: 0 };
 
   const handlePlayPause = () => {
     setIsPlaying(!isPlaying);
@@ -168,37 +172,48 @@ export default function MusicStreamingApp() {
             </p>
           </div>
 
-          {/* Playlist Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {playlists.map((playlist) => (
-              <div
-                key={playlist.id}
-                className="card-hover group bg-[#282828] rounded-xl p-5 cursor-pointer transition-all duration-300"
-              >
-                {/* Image Placeholder */}
-                <div className="w-full aspect-square bg-gradient-to-br from-[#1DB954] to-[#1aa34a] rounded-lg mb-4 flex items-center justify-center group-hover:shadow-lg transition-shadow">
-                  <Music className="w-16 h-16 text-white opacity-40" />
-                </div>
+          {loading && (
+            <div className="flex items-center justify-center py-20">
+              <Loader2 className="w-8 h-8 text-[#1DB954] animate-spin" />
+            </div>
+          )}
 
-                {/* Content */}
-                <h3 className="text-lg font-bold text-white mb-2 line-clamp-1">
-                  {playlist.title}
-                </h3>
-                <p className="text-[#B3B3B3] text-sm line-clamp-2 mb-3 leading-relaxed">
-                  {playlist.description}
-                </p>
+          {error && (
+            <div className="bg-red-900/20 border border-red-800 rounded-lg p-4 text-red-300">
+              Failed to load data: {error}
+            </div>
+          )}
 
-                {/* Meta */}
-                <div className="text-xs text-[#B3B3B3] flex items-center gap-2">
-                  <span className="font-medium">
-                    {(playlist.plays / 1000).toFixed(0)}K plays
-                  </span>
-                  <span>•</span>
-                  <span>Added 2 weeks ago</span>
+          {!loading && !error && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {playlists.map((playlist) => (
+                <div
+                  key={playlist.id}
+                  className="card-hover group bg-[#282828] rounded-xl p-5 cursor-pointer transition-all duration-300"
+                >
+                  {/* Image Placeholder */}
+                  <div className="w-full aspect-square bg-gradient-to-br from-[#1DB954] to-[#1aa34a] rounded-lg mb-4 flex items-center justify-center group-hover:shadow-lg transition-shadow">
+                    <Music className="w-16 h-16 text-white opacity-40" />
+                  </div>
+
+                  {/* Content */}
+                  <h3 className="text-lg font-bold text-white mb-2 line-clamp-1">
+                    {playlist.title}
+                  </h3>
+                  <p className="text-[#B3B3B3] text-sm line-clamp-2 mb-3 leading-relaxed">
+                    {playlist.description}
+                  </p>
+
+                  {/* Meta */}
+                  <div className="text-xs text-[#B3B3B3] flex items-center gap-2">
+                    <span className="font-medium">{formatPlays(playlist.plays)}</span>
+                    <span>•</span>
+                    <span>{timeAgo(playlist.created_at)}</span>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
 
           {/* Spacing for player bar */}
           <div className="h-8"></div>
@@ -266,7 +281,7 @@ export default function MusicStreamingApp() {
                 style={{ width: `${progress}%` }}
               ></div>
             </div>
-            <span className="text-xs text-[#B3B3B3] w-8">5:30</span>
+            <span className="text-xs text-[#B3B3B3] w-8">{formatDuration(currentTrack.duration)}</span>
           </div>
         </div>
 
